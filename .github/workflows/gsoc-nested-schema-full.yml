@@ -1,4 +1,4 @@
-name: Verify nested schema context candidate
+name: Verify nested schema compatibility and full suite
 
 on:
   workflow_dispatch:
@@ -12,10 +12,20 @@ concurrency:
 
 jobs:
   full-suite:
+    name: ${{ matrix.profile }} on Python ${{ matrix.python }}
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - python: '3.12'
+            profile: strict-full
+          - python: '3.14'
+            profile: upstream-ci
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
-      PYHF_RESULTS: /tmp/pyhf-nested-schema-${{ github.run_id }}-${{ github.run_attempt }}
+      PYHF_RESULTS: /tmp/pyhf-nested-schema-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.profile }}
     steps:
       - name: Check out exact production candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -28,7 +38,7 @@ jobs:
       - name: Set up supported default Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
-          python-version: '3.14'
+          python-version: ${{ matrix.python }}
 
       - name: Verify source and prepare results
         shell: bash
@@ -85,7 +95,87 @@ jobs:
           print(f"Verified {len(checks)} installed Python/schema files against exact candidate")
           PYTHON
 
+      - name: Reproduce Python 3.14 collection failure on unchanged upstream
+        if: matrix.profile == 'upstream-ci'
+        shell: bash
+        run: |
+          git checkout --detach 2c99d0b7cfa703c3798c6588312857c5b3e97d51
+          test "$(git rev-parse HEAD^{tree})" = 2cdce70dfbaa1ef694168c341668ad0472be8f0f
+          uv pip install --no-cache --system --force-reinstall --no-deps . 2>&1 | tee "$PYHF_RESULTS/baseline-install.log"
+          python - <<'PYTHON'
+          import hashlib
+          import importlib.metadata
+          import json
+          import os
+          from pathlib import Path
+          import pyhf
+          import sys
+          actual = hashlib.sha256(Path(pyhf.schema.__file__).read_bytes()).hexdigest()
+          assert actual == "0d2b5a1ca506740ac6ae8f4e5f94983d6dcf1569c37a21fbd9d24520cbdfdee3"
+          assert importlib.metadata.version("jupyter-client") == "7.4.9"
+          record = {"source": "2c99d0b7cfa703c3798c6588312857c5b3e97d51", "python": sys.version, "pyhf": pyhf.__file__, "schema": pyhf.schema.__file__, "schema_sha256": actual, "jupyter-client": importlib.metadata.version("jupyter-client"), "nbclient": importlib.metadata.version("nbclient"), "papermill": importlib.metadata.version("papermill")}
+          (Path(os.environ["PYHF_RESULTS"]) / "baseline-provenance.json").write_text(json.dumps(record, indent=2) + "\n")
+          PYTHON
+          set +e
+          python -m pytest --collect-only tests/test_notebooks.py --junitxml="$PYHF_RESULTS/baseline-collection.xml" 2>&1 | tee "$PYHF_RESULTS/baseline-collection.log"
+          baseline_collection_exit=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$baseline_collection_exit" > "$PYHF_RESULTS/baseline-collection.exit"
+          test "$baseline_collection_exit" = 2
+          python - <<'PYTHON'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          folder = Path(os.environ["PYHF_RESULTS"])
+          errors = list(ET.parse(folder / "baseline-collection.xml").getroot().iter("error"))
+          assert len(errors) == 2, len(errors)
+          for error in errors:
+              assert "DeprecationWarning: Parsing dates involving a day of month without a year specified is ambiguous" in error.text
+              assert "jupyter_client/jsonutil.py" in error.text
+          PYTHON
+          git checkout --detach 3e208d2657b8c7db6cf8d17ecf8a188542c72197
+          test "$(git rev-parse HEAD^{tree})" = 927e8788d66fe1f99c8e5163ada224ad33b5f3ca
+          uv pip install --no-cache --system --force-reinstall --no-deps . 2>&1 | tee "$PYHF_RESULTS/candidate-restored-install.log"
+          python -m pip check
+
+      - name: Reverify exact candidate runtime after baseline replay
+        if: matrix.profile == 'upstream-ci'
+        shell: bash
+        run: |
+          python - <<'PYTHON'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          import pyhf
+
+          checkout = Path.cwd().resolve()
+          package = Path(pyhf.__file__).resolve().parent
+          assert not package.is_relative_to(checkout), package
+          checks = []
+          for source in sorted((checkout / "src/pyhf").rglob("*")):
+              if source.suffix not in {".py", ".json"} or source.name == "_version.py":
+                  continue
+              if "__pycache__" in source.parts:
+                  continue
+              relative = source.relative_to(checkout / "src/pyhf")
+              installed = package / relative
+              assert installed.is_file(), str(relative)
+              expected = hashlib.sha256(source.read_bytes()).hexdigest()
+              actual = hashlib.sha256(installed.read_bytes()).hexdigest()
+              assert actual == expected, str(relative)
+              checks.append({"path": str(relative), "sha256": actual})
+          assert hashlib.sha256((checkout / "src/pyhf/schema/__init__.py").read_bytes()).hexdigest() == "06e718d3f0c8a616e65835f25e42d569bfbd0a18ab7f18fbaf0c8f0490f2c864"
+          assert hashlib.sha256((checkout / "tests/test_schema.py").read_bytes()).hexdigest() == "0e5c048ef1e5f1161670588099323373611625309153e13ac5cc37f2f5e737fb"
+          result = {"candidate": "3e208d2657b8c7db6cf8d17ecf8a188542c72197", "tree": "927e8788d66fe1f99c8e5163ada224ad33b5f3ca", "python": sys.version, "executable": sys.executable, "package_origin": str(package), "schema_origin": pyhf.schema.__file__, "version_metadata": pyhf.__version__, "installed_file_checks": checks}
+          (Path(os.environ["PYHF_RESULTS"]) / "restored-installed-provenance.json").write_text(json.dumps(result, indent=2) + "\n")
+          print(json.dumps({key: value for key, value in result.items() if key != "installed_file_checks"}, indent=2))
+          print(f"Verified {len(checks)} installed Python/schema files against exact candidate")
+          PYTHON
+
       - name: Run complete default pytest suite
+        if: matrix.profile == 'strict-full'
         shell: bash
         run: |
           set +e
@@ -94,6 +184,17 @@ jobs:
           set -e
           printf '%s\n' "$full_pytest_exit" > "$PYHF_RESULTS/full-pytest.exit"
           exit "$full_pytest_exit"
+
+      - name: Run upstream strict core CI check on Python 3.14
+        if: matrix.profile == 'upstream-ci'
+        shell: bash
+        run: |
+          set +e
+          coverage run --module pytest --ignore tests/contrib --ignore tests/benchmarks --ignore tests/test_notebooks.py --junitxml="$PYHF_RESULTS/core-pytest.xml" 2>&1 | tee "$PYHF_RESULTS/core-pytest.log"
+          core_pytest_exit=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$core_pytest_exit" > "$PYHF_RESULTS/core-pytest.exit"
+          exit "$core_pytest_exit"
 
       - name: Run upstream contrib image-comparison check
         shell: bash
@@ -115,6 +216,28 @@ jobs:
           printf '%s\n' "$doctest_pytest_exit" > "$PYHF_RESULTS/doctest-pytest.exit"
           exit "$doctest_pytest_exit"
 
+      - name: Run upstream notebook check on Python 3.14
+        if: matrix.profile == 'upstream-ci'
+        shell: bash
+        run: |
+          set +e
+          python -m pytest --verbose --override-ini filterwarnings= tests/test_notebooks.py --junitxml="$PYHF_RESULTS/notebook-pytest.xml" 2>&1 | tee "$PYHF_RESULTS/notebook-pytest.log"
+          notebook_pytest_exit=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$notebook_pytest_exit" > "$PYHF_RESULTS/notebook-pytest.exit"
+          exit "$notebook_pytest_exit"
+
+      - name: Run default benchmarks on Python 3.14
+        if: matrix.profile == 'upstream-ci'
+        shell: bash
+        run: |
+          set +e
+          python -m pytest tests/benchmarks --junitxml="$PYHF_RESULTS/benchmark-pytest.xml" 2>&1 | tee "$PYHF_RESULTS/benchmark-pytest.log"
+          benchmark_pytest_exit=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$benchmark_pytest_exit" > "$PYHF_RESULTS/benchmark-pytest.exit"
+          exit "$benchmark_pytest_exit"
+
       - name: Record final tracked-source status
         if: always()
         shell: bash
@@ -126,7 +249,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: pyhf-nested-schema-exact-candidate
+          name: pyhf-nested-schema-${{ matrix.profile }}
           path: ${{ env.PYHF_RESULTS }}/
           if-no-files-found: error
           retention-days: 14
