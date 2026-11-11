@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: dhairyajangir/pyhf
-          ref: 3e208d2657b8c7db6cf8d17ecf8a188542c72197
+          ref: 10c0d1f166015a3505994cce451413bb87c8d379
           fetch-depth: 0
           persist-credentials: false
 
@@ -44,8 +44,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$PYHF_RESULTS"
-          test "$(git rev-parse HEAD)" = 3e208d2657b8c7db6cf8d17ecf8a188542c72197
-          test "$(git rev-parse HEAD^{tree})" = 927e8788d66fe1f99c8e5163ada224ad33b5f3ca
+          test "$(git rev-parse HEAD)" = 10c0d1f166015a3505994cce451413bb87c8d379
+          test "$(git rev-parse HEAD^{tree})" = 5702b38a96747d0e1e0ffb8cfb7fb174c6ce1a9d
           git status --porcelain=v1 > "$PYHF_RESULTS/source-status-before.txt"
           test ! -s "$PYHF_RESULTS/source-status-before.txt"
           git show --no-patch --format=fuller HEAD > "$PYHF_RESULTS/source-commit.txt"
@@ -87,9 +87,9 @@ jobs:
               actual = hashlib.sha256(installed.read_bytes()).hexdigest()
               assert actual == expected, str(relative)
               checks.append({"path": str(relative), "sha256": actual})
-          assert hashlib.sha256((checkout / "src/pyhf/schema/__init__.py").read_bytes()).hexdigest() == "06e718d3f0c8a616e65835f25e42d569bfbd0a18ab7f18fbaf0c8f0490f2c864"
-          assert hashlib.sha256((checkout / "tests/test_schema.py").read_bytes()).hexdigest() == "0e5c048ef1e5f1161670588099323373611625309153e13ac5cc37f2f5e737fb"
-          result = {"candidate": "3e208d2657b8c7db6cf8d17ecf8a188542c72197", "tree": "927e8788d66fe1f99c8e5163ada224ad33b5f3ca", "python": sys.version, "executable": sys.executable, "package_origin": str(package), "schema_origin": pyhf.schema.__file__, "version_metadata": pyhf.__version__, "installed_file_checks": checks}
+          assert hashlib.sha256((checkout / "src/pyhf/schema/__init__.py").read_bytes()).hexdigest() == "91e49bbdc3936e2651a045e52157a48daa47135c32c87bfbc0d2abed0aa6a748"
+          assert hashlib.sha256((checkout / "tests/test_schema.py").read_bytes()).hexdigest() == "4685f779a41e8b6334d09968c0de4bcfd641e150b800f66962ea07ebf9751bc6"
+          result = {"candidate": "10c0d1f166015a3505994cce451413bb87c8d379", "tree": "5702b38a96747d0e1e0ffb8cfb7fb174c6ce1a9d", "python": sys.version, "executable": sys.executable, "package_origin": str(package), "schema_origin": pyhf.schema.__file__, "version_metadata": pyhf.__version__, "installed_file_checks": checks}
           (Path(os.environ["PYHF_RESULTS"]) / "installed-provenance.json").write_text(json.dumps(result, indent=2) + "\n")
           print(json.dumps({key: value for key, value in result.items() if key != "installed_file_checks"}, indent=2))
           print(f"Verified {len(checks)} installed Python/schema files against exact candidate")
@@ -133,8 +133,8 @@ jobs:
               assert "DeprecationWarning: Parsing dates involving a day of month without a year specified is ambiguous" in error.text
               assert "jupyter_client/jsonutil.py" in error.text
           PYTHON
-          git checkout --detach 3e208d2657b8c7db6cf8d17ecf8a188542c72197
-          test "$(git rev-parse HEAD^{tree})" = 927e8788d66fe1f99c8e5163ada224ad33b5f3ca
+          git checkout --detach 10c0d1f166015a3505994cce451413bb87c8d379
+          test "$(git rev-parse HEAD^{tree})" = 5702b38a96747d0e1e0ffb8cfb7fb174c6ce1a9d
           uv pip install --no-cache --system --force-reinstall --no-deps . 2>&1 | tee "$PYHF_RESULTS/candidate-restored-install.log"
           python -m pip check
 
@@ -166,9 +166,9 @@ jobs:
               actual = hashlib.sha256(installed.read_bytes()).hexdigest()
               assert actual == expected, str(relative)
               checks.append({"path": str(relative), "sha256": actual})
-          assert hashlib.sha256((checkout / "src/pyhf/schema/__init__.py").read_bytes()).hexdigest() == "06e718d3f0c8a616e65835f25e42d569bfbd0a18ab7f18fbaf0c8f0490f2c864"
-          assert hashlib.sha256((checkout / "tests/test_schema.py").read_bytes()).hexdigest() == "0e5c048ef1e5f1161670588099323373611625309153e13ac5cc37f2f5e737fb"
-          result = {"candidate": "3e208d2657b8c7db6cf8d17ecf8a188542c72197", "tree": "927e8788d66fe1f99c8e5163ada224ad33b5f3ca", "python": sys.version, "executable": sys.executable, "package_origin": str(package), "schema_origin": pyhf.schema.__file__, "version_metadata": pyhf.__version__, "installed_file_checks": checks}
+          assert hashlib.sha256((checkout / "src/pyhf/schema/__init__.py").read_bytes()).hexdigest() == "91e49bbdc3936e2651a045e52157a48daa47135c32c87bfbc0d2abed0aa6a748"
+          assert hashlib.sha256((checkout / "tests/test_schema.py").read_bytes()).hexdigest() == "4685f779a41e8b6334d09968c0de4bcfd641e150b800f66962ea07ebf9751bc6"
+          result = {"candidate": "10c0d1f166015a3505994cce451413bb87c8d379", "tree": "5702b38a96747d0e1e0ffb8cfb7fb174c6ce1a9d", "python": sys.version, "executable": sys.executable, "package_origin": str(package), "schema_origin": pyhf.schema.__file__, "version_metadata": pyhf.__version__, "installed_file_checks": checks}
           (Path(os.environ["PYHF_RESULTS"]) / "restored-installed-provenance.json").write_text(json.dumps(result, indent=2) + "\n")
           print(json.dumps({key: value for key, value in result.items() if key != "installed_file_checks"}, indent=2))
           print(f"Verified {len(checks)} installed Python/schema files against exact candidate")
